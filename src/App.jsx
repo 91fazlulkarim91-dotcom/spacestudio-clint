@@ -113,20 +113,24 @@ const API_BASE = (
 ).replace(/\/$/, "");
 async function apiRequest(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
     ...options,
+    credentials: "include",
     headers: {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...options.headers,
     },
   });
+  const result =
+    response.status === 204
+      ? null
+      : await response.json().catch(() => ({}));
+
   if (!response.ok) {
-    const result = await response.json().catch(() => ({}));
     throw new Error(
-      result.error || "Could not connect to StudioSpace. Please try again.",
+      result?.error || "Could not connect to StudioSpace. Please try again.",
     );
   }
-  return response.status === 204 ? null : response.json();
+  return result;
 }
 
 function App() {
@@ -152,21 +156,51 @@ function App() {
   }, []);
   useEffect(() => {
     let active = true;
-    if (new URLSearchParams(location.search).has("oauthError")) {
-      setToast("Google sign-in could not be completed. Please try again.");
-      history.replaceState({}, "", location.pathname);
-      setPath(location.pathname);
-    }
-    apiRequest("/api/auth/me")
-      .then(({ user: sessionUser }) => {
-        if (active) setUser(sessionUser);
-      })
-      .catch(() => {
-        if (active) setUser(null);
-      })
-      .finally(() => {
-        if (active) setAuthReady(true);
-      });
+
+    const checkAuth = async () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+
+        if (params.has("oauthError")) {
+          setToast("Google sign-in could not be completed. Please try again.");
+
+          history.replaceState({}, "", window.location.pathname);
+          setPath(window.location.pathname);
+        }
+
+        const result = await apiRequest("/api/auth/me");
+
+        if (!active) return;
+
+        const sessionUser = result?.user || null;
+
+        setUser(sessionUser);
+
+        if (sessionUser) {
+          const next = sessionStorage.getItem("ss-next");
+
+          if (next) {
+            sessionStorage.removeItem("ss-next");
+
+            history.replaceState({}, "", next);
+            setPath(next);
+          }
+        }
+      } catch (error) {
+        console.error("Authentication check failed:", error);
+
+        if (active) {
+          setUser(null);
+        }
+      } finally {
+        if (active) {
+          setAuthReady(true);
+        }
+      }
+    };
+
+    checkAuth();
+
     return () => {
       active = false;
     };
@@ -322,7 +356,9 @@ function App() {
           >
             {dark ? "☼" : "◐"}
           </button>
-          {user ? (
+          {!authReady ? (
+            <span className="auth-loading">Checking...</span>
+          ) : user ? (
             <div className="profile-wrap">
               <button className="avatar-button" onClick={() => setMenu(!menu)}>
                 <img
