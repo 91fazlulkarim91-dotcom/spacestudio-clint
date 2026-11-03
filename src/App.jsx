@@ -32,7 +32,7 @@ const API_BASE = (
   (import.meta.env.PROD
     ? "https://studiospace-server-orpin.vercel.app"
     : "http://localhost:4000")
-).replace(/\\/$/, "");
+).replace(/\/$/, "");
 
 async function apiRequest(path, options = {}) {
   let response;
