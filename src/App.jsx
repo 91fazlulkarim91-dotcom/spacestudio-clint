@@ -25,29 +25,53 @@ const stored = (key, fallback) => {
     return fallback;
   }
 };
+// Production uses the deployed Vercel API. Override with VITE_API_URL
+// in Vercel Project Settings -> Environment Variables if the API domain changes.
 const API_BASE = (
-  import.meta.env.VITE_API_URL || "http://localhost:4000"
-).replace(/\/$/, "");
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD
+    ? "https://studiospace-server-orpin.vercel.app"
+    : "http://localhost:4000")
+).replace(/\\/$/, "");
+
 async function apiRequest(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    credentials: "include",
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers,
-    },
-  });
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      credentials: "include",
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
+    });
+  } catch (error) {
+    console.error("StudioSpace API network error:", error);
+    throw new Error(
+      `Cannot reach StudioSpace API (${API_BASE}). Check the Vercel API deployment, CORS, and VITE_API_URL.`,
+    );
+  }
+
+  const contentType = response.headers.get("content-type") || "";
   const result =
     response.status === 204
       ? null
-      : await response.json().catch(() => ({}));
+      : contentType.includes("application/json")
+        ? await response.json().catch(() => ({}))
+        : {};
+
   if (!response.ok) {
     throw new Error(
-      result?.error || "Could not connect to StudioSpace. Please try again.",
+      result?.error ||
+        result?.message ||
+        `StudioSpace API request failed (${response.status}).`,
     );
   }
+
   return result;
 }
+
 function normalizeStudio(studio) {
   if (!studio) return null;
   return {
