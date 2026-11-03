@@ -1,97 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
-
-const seed = [
-  {
-    id: "s1",
-    title: "The Daylight Loft",
-    category: "Photo Studio",
-    rate: 85,
-    location: "Brooklyn, New York",
-    rating: "4.98",
-    image: "photo- studio",
-    photo: "photo-1497366754035-f200968a6e72",
-    tag: "BESTSELLER",
-    description:
-      "A sun drenched, south facing creative loft with a full cyclorama wall, generous natural light and room to make something unforgettable.",
-    amenities: [
-      "Cyclorama wall",
-      "Natural light",
-      "Flash kit",
-      "Changing room",
-    ],
-  },
-  {
-    id: "s2",
-    title: "Analog House",
-    category: "Music Suite",
-    rate: 65,
-    location: "East Austin, Texas",
-    rating: "4.95",
-    photo: "photo-1598488035139-bdbb2231ce04",
-    tag: "CREATOR PICK",
-    description:
-      "A warm, acoustically treated recording room, set up for live tracking, intimate sessions and everything in between.",
-    amenities: ["Live room", "Neumann U87", "Analog console", "Lounge"],
-  },
-  {
-    id: "s3",
-    title: "Room Tone Stage",
-    category: "Film Stage",
-    rate: 140,
-    location: "Queens, New York",
-    rating: "4.91",
-    photo: "photo-1506157786151-b8491531f063",
-    tag: "NEW",
-    description:
-      "A versatile black box stage with a lighting grid, quiet power and all the space your next production needs.",
-    amenities: [
-      "Lighting grid",
-      "Green room",
-      "3-phase power",
-      "Load-in access",
-    ],
-  },
-  {
-    id: "s4",
-    title: "Soft Focus Studio",
-    category: "Photo Studio",
-    rate: 72,
-    location: "Silver Lake, Los Angeles",
-    rating: "4.97",
-    photo: "photo-1531058020387-3be344556be6",
-    tag: "GUEST FAVORITE",
-    description:
-      "Thoughtfully styled sets and soft west coast light for portraits, editorials, product shoots and small crews.",
-    amenities: ["Styling sets", "V-flats", "Props", "Parking"],
-  },
-  {
-    id: "s5",
-    title: "The Listening Room",
-    category: "Podcast Lounge",
-    rate: 95,
-    location: "Lower East Side, New York",
-    rating: "4.99",
-    photo: "photo-1590602847861-f357a9332bbc",
-    tag: "TOP RATED",
-    description:
-      "An inviting podcast room with a four mic setup, beautiful warm light and a quiet booth for clean recordings.",
-    amenities: ["4 microphones", "Sound treated", "Video setup", "Coffee bar"],
-  },
-  {
-    id: "s6",
-    title: "Clay House Workshop",
-    category: "Art Workshop",
-    rate: 55,
-    location: "Portland, Oregon",
-    rating: "4.89",
-    photo: "photo-1565193566173-7a0ee3dbe261",
-    tag: "HIDDEN GEM",
-    description:
-      "A bright, fully equipped ceramics workshop made for classes, small collaborations and making a beautiful mess.",
-    amenities: ["Pottery wheels", "Kiln access", "Work tables", "Aprons"],
-  },
-];
 const categories = [
   ["Photo Studios", "◉", "Find your light"],
   ["Film Stages", "▤", "Big ideas, bigger sets"],
@@ -99,8 +7,17 @@ const categories = [
   ["Music Suites", "♫", "Make a little noise"],
   ["Art Workshops", "✳", "Room to get messy"],
 ];
-const image = (id, w = 900) =>
-  `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=85`;
+const image = (id, w = 900) => {
+  if (!id) return "";
+  if (/^https?:\/\//i.test(id)) return id;
+  return `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=85`;
+};
+const listFrom = (result, keys = []) => {
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.items)) return result.items;
+  for (const key of keys) if (Array.isArray(result?.[key])) return result[key];
+  return [];
+};
 const stored = (key, fallback) => {
   try {
     return JSON.parse(localStorage.getItem(key)) ?? fallback;
@@ -124,13 +41,39 @@ async function apiRequest(path, options = {}) {
     response.status === 204
       ? null
       : await response.json().catch(() => ({}));
-
   if (!response.ok) {
     throw new Error(
       result?.error || "Could not connect to StudioSpace. Please try again.",
     );
   }
   return result;
+}
+function normalizeStudio(studio) {
+  if (!studio) return null;
+  return {
+    ...studio,
+    id: String(studio._id || studio.id || ""),
+    rate: Number(studio.rate ?? studio.hourlyRate ?? 0),
+    photo: studio.photo || studio.imageUrl || studio.image || "",
+    imageUrl: studio.imageUrl || studio.photo || "",
+    rating: studio.rating || "New",
+    tag: studio.tag || "CREATOR SPACE",
+    owner: studio.ownerEmail || studio.owner || "",
+    amenities: Array.isArray(studio.amenities) ? studio.amenities : [],
+  };
+}
+
+function normalizeBooking(booking, studioList = []) {
+  const studio = studioList.find((item) => item.id === String(booking.studioId));
+  return {
+    ...booking,
+    id: String(booking._id || booking.id || ""),
+    studioId: String(booking.studioId || ""),
+    title: booking.title || booking.studioTitle || booking.studioName || studio?.title || "Studio booking",
+    owner: booking.userEmail || booking.customerEmail || booking.owner || "",
+    rate: Number(booking.hourlyRate ?? booking.rate ?? studio?.rate ?? 0),
+    status: booking.status || "Pending",
+  };
 }
 
 function App() {
@@ -139,16 +82,16 @@ function App() {
   const [authReady, setAuthReady] = useState(false);
   const [dark, setDark] = useState(() => stored("ss-dark", false));
   const [toast, setToast] = useState("");
-  const [studios, setStudios] = useState(() => stored("ss-studios", seed));
-  const [bookings, setBookings] = useState(() => stored("ss-bookings", []));
-  const [favorites, setFavorites] = useState(() => stored("ss-favorites", []));
+  const [studios, setStudios] = useState([]);
+  const [studiosLoading, setStudiosLoading] = useState(true);
+  const [bookings, setBookings] = useState([]);
+  const [favorites, setFavorites] = useState([]);
   const [menu, setMenu] = useState(false);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState(
     new URLSearchParams(location.search).get("category") || "All spaces",
   );
   const [modal, setModal] = useState(null);
-
   useEffect(() => {
     const onPop = () => setPath(location.pathname + location.search);
     addEventListener("popstate", onPop);
@@ -156,39 +99,30 @@ function App() {
   }, []);
   useEffect(() => {
     let active = true;
-
     const checkAuth = async () => {
       try {
         const params = new URLSearchParams(window.location.search);
-
         if (params.has("oauthError")) {
           setToast("Google sign-in could not be completed. Please try again.");
-
           history.replaceState({}, "", window.location.pathname);
           setPath(window.location.pathname);
         }
-
         const result = await apiRequest("/api/auth/me");
-
         if (!active) return;
-
         const sessionUser = result?.user || null;
-
         setUser(sessionUser);
-
         if (sessionUser) {
           const next = sessionStorage.getItem("ss-next");
-
           if (next) {
             sessionStorage.removeItem("ss-next");
-
-            history.replaceState({}, "", next);
-            setPath(next);
+            if (next.startsWith("/") && !next.startsWith("//")) {
+              history.replaceState({}, "", next);
+              setPath(next);
+            }
           }
         }
       } catch (error) {
         console.error("Authentication check failed:", error);
-
         if (active) {
           setUser(null);
         }
@@ -198,9 +132,7 @@ function App() {
         }
       }
     };
-
     checkAuth();
-
     return () => {
       active = false;
     };
@@ -209,15 +141,60 @@ function App() {
     localStorage.setItem("ss-dark", JSON.stringify(dark));
     document.documentElement.dataset.theme = dark ? "dark" : "light";
   }, [dark]);
+  // Fetch public studios from the backend instead of browser storage.
   useEffect(() => {
-    localStorage.setItem("ss-studios", JSON.stringify(studios));
-  }, [studios]);
+    let active = true;
+    const loadStudios = async () => {
+      setStudiosLoading(true);
+      try {
+        const result = await apiRequest("/api/studios");
+        if (active) setStudios(listFrom(result, ["studios"]).map(normalizeStudio).filter(Boolean));
+      } catch (error) {
+        console.error("Could not load studios:", error);
+        if (active) setToast(error.message || "Could not load studios.");
+      } finally {
+        if (active) setStudiosLoading(false);
+      }
+    };
+    loadStudios();
+    return () => { active = false; };
+  }, []);
+
+  // Load private data after the authentication check completes.
   useEffect(() => {
-    localStorage.setItem("ss-bookings", JSON.stringify(bookings));
-  }, [bookings]);
-  useEffect(() => {
-    localStorage.setItem("ss-favorites", JSON.stringify(favorites));
-  }, [favorites]);
+    if (!authReady || !user) {
+      if (authReady && !user) { setBookings([]); setFavorites([]); }
+      return;
+    }
+    let active = true;
+    const loadPrivateData = async () => {
+      const results = await Promise.allSettled([
+        apiRequest("/api/my/studios"),
+        apiRequest("/api/my/bookings"),
+        apiRequest("/api/my/favorites"),
+      ]);
+      if (!active) return;
+      const [myStudios, myBookings, myFavorites] = results;
+      if (myStudios.status === "fulfilled") {
+        const ownItems = listFrom(myStudios.value, ["studios"]).map(normalizeStudio).filter(Boolean);
+        setStudios((current) => {
+          const merged = new Map(current.filter((item) => item.owner !== user.email).map((item) => [item.id, item]));
+          ownItems.forEach((item) => merged.set(item.id, item));
+          return [...merged.values()];
+        });
+      } else console.error("Could not load your studios:", myStudios.reason);
+      if (myBookings.status === "fulfilled") {
+        setBookings(listFrom(myBookings.value, ["bookings"]).map((item) => normalizeBooking(item, studios)));
+      } else console.error("Could not load your bookings:", myBookings.reason);
+      if (myFavorites.status === "fulfilled") {
+        const favoriteData = listFrom(myFavorites.value, ["favorites", "studioIds"]);
+        setFavorites(favoriteData.map((item) => String(typeof item === "string" ? item : item.studioId || item._id || item.id)));
+      } else console.error("Could not load your favorites:", myFavorites.reason);
+    };
+    loadPrivateData();
+    return () => { active = false; };
+  }, [authReady, user]);
+
   useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(""), 3000);
@@ -238,52 +215,100 @@ function App() {
       go("/login");
     } else go(to);
   };
-  const filtered = useMemo(
-    () =>
-      studios.filter(
-        (s) =>
-          (category === "All spaces" ||
-            s.category === category ||
-            (category === "Film Stages" && s.category === "Film Stage") ||
-            (category === "Podcast Rooms" && s.category === "Podcast Lounge") ||
-            (category === "Art Workshops" && s.category === "Art Workshop")) &&
-          (s.title + s.location + s.category)
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-      ),
-    [studios, category, query],
-  );
+  const categoryMap = {
+    "Photo Studios": "Photo Studio",
+    "Film Stages": "Film Stage",
+    "Podcast Rooms": "Podcast Lounge",
+    "Music Suites": "Music Suite",
+    "Art Workshops": "Art Workshop",
+  };
+  const filtered = useMemo(() => {
+    return studios.filter((s) => {
+      const selectedCategory = categoryMap[category] || category;
+      const matchesCategory =
+        category === "All spaces" || s.category === selectedCategory;
+      const searchText = (
+        s.title +
+        " " +
+        s.location +
+        " " +
+        s.category
+      ).toLowerCase();
+      const matchesSearch = searchText.includes(query.toLowerCase());
+      return matchesCategory && matchesSearch;
+    });
+  }, [studios, category, query]);
   const route = path.split("?")[0];
   const selected = studios.find((s) => route === `/studios/${s.id}`);
-  const toggleFavorite = (id) => {
+  const toggleFavorite = async (id) => {
     if (!user) return requireAuth(`/studios/${id}`);
-    setFavorites(
-      favorites.includes(id)
-        ? favorites.filter((f) => f !== id)
-        : [...favorites, id],
-    );
-    setToast(
-      favorites.includes(id)
-        ? "Removed from your saved spaces"
-        : "Saved to your wishlist",
-    );
+    const alreadySaved = favorites.includes(String(id));
+    try {
+      await apiRequest(`/api/my/favorites/${encodeURIComponent(id)}`, {
+        method: alreadySaved ? "DELETE" : "PUT",
+      });
+      setFavorites((current) => alreadySaved
+        ? current.filter((favoriteId) => favoriteId !== String(id))
+        : [...current, String(id)]);
+      setToast(alreadySaved ? "Removed from your saved spaces" : "Saved to your wishlist");
+    } catch (error) {
+      setToast(error.message || "Could not update your wishlist.");
+    }
   };
-  const book = (studio, form) => {
-    const b = {
-      id: Date.now(),
-      studioId: studio.id,
+
+  const book = async (studio, form) => {
+    try {
+      await apiRequest("/api/bookings", {
+        method: "POST",
+        body: JSON.stringify({ studioId: studio.id, date: form.date, start: form.start, end: form.end }),
+      });
+      const result = await apiRequest("/api/my/bookings");
+      setBookings(listFrom(result, ["bookings"]).map((item) => normalizeBooking(item, studios)));
+      setModal(null);
+      setToast("Booking request sent");
+      go("/my-bookings");
+    } catch (error) {
+      setToast(error.message || "Could not create booking.");
+    }
+  };
+
+  const createStudio = async (studio) => {
+    const payload = {
       title: studio.title,
-      owner: user.email,
-      date: form.date,
-      start: form.start,
-      end: form.end,
-      status: "Pending",
-      rate: studio.rate,
+      category: studio.category,
+      rate: Number(studio.rate),
+      location: studio.location,
+      imageUrl: studio.photo || studio.imageUrl,
+      photo: studio.photo || studio.imageUrl,
+      deposit: Number(studio.deposit || 0),
+      capacity: Number(studio.capacity || 1),
+      amenities: studio.amenities || [],
+      description: studio.description || "",
     };
-    setBookings([...bookings, b]);
+    await apiRequest("/api/studios", { method: "POST", body: JSON.stringify(payload) });
+    const [publicResult, ownResult] = await Promise.all([apiRequest("/api/studios"), apiRequest("/api/my/studios")]);
+    const merged = new Map();
+    [...listFrom(publicResult, ["studios"]), ...listFrom(ownResult, ["studios"])].map(normalizeStudio).filter(Boolean).forEach((item) => merged.set(item.id, item));
+    setStudios([...merged.values()]);
+    setToast("Your studio is live");
+    go("/my-listings");
+  };
+
+  const deleteStudio = async (studio) => {
+    await apiRequest(`/api/studios/${encodeURIComponent(studio.id)}`, { method: "DELETE" });
+    setStudios((current) => current.filter((item) => item.id !== studio.id));
     setModal(null);
-    setToast("Booking request sent");
-    go("/my-bookings");
+    setToast("Studio listing deleted");
+  };
+
+  const cancelBooking = async (booking) => {
+    try {
+      await apiRequest(`/api/bookings/${encodeURIComponent(booking.id)}/cancel`, { method: "PATCH" });
+      setBookings((current) => current.map((item) => item.id === booking.id ? { ...item, status: "Cancelled" } : item));
+      setToast("Booking cancelled");
+    } catch (error) {
+      setToast(error.message || "Could not cancel booking.");
+    }
   };
 
   return (
@@ -389,12 +414,18 @@ function App() {
                   <button
                     className="logout"
                     onClick={async () => {
-                      await apiRequest("/api/auth/logout", {
-                        method: "POST",
-                      }).catch(() => {});
-                      setUser(null);
-                      go("/");
-                      setToast("You’re signed out");
+                      try {
+                        await apiRequest("/api/auth/logout", {
+                          method: "POST",
+                        });
+                        setUser(null);
+                        setMenu(false);
+                        go("/");
+                        setToast("You're signed out");
+                      } catch (error) {
+                        console.error("Logout failed:", error);
+                        setToast("Could not sign out. Please try again.");
+                      }
                     }}
                   >
                     Sign out
@@ -477,6 +508,7 @@ function App() {
               ☷ <span>Filters</span>
             </button>
           </div>
+          {studiosLoading && <p className="form-lead">Loading creative spaces…</p>}
           <div className="studio-grid">
             {filtered.map((s) => (
               <StudioCard
@@ -534,7 +566,7 @@ function App() {
               <h2>What this space offers</h2>
               <div className="amenities">
                 {selected.amenities.map((a) => (
-                  <span key={a}>✳ &nbsp;{a}</span>
+                  <span key={a}>✳  {a}</span>
                 ))}
               </div>
               <div className="host-card">
@@ -570,7 +602,7 @@ function App() {
               </button>
               <small>You won’t be charged yet</small>
               <div className="booking-assurance">
-                ◉ &nbsp;Free cancellation within 24 hours
+                ◉  Free cancellation within 24 hours
               </div>
             </aside>
           </div>
@@ -601,6 +633,9 @@ function App() {
             bookings={bookings}
             setBookings={setBookings}
             setToast={setToast}
+            createStudio={createStudio}
+            deleteStudio={deleteStudio}
+            cancelBooking={cancelBooking}
             modal={modal}
             setModal={setModal}
           />
@@ -659,10 +694,9 @@ function App() {
           <ConfirmDelete
             studio={modal.studio}
             close={() => setModal(null)}
-            confirm={() => {
-              setStudios(studios.filter((s) => s.id !== modal.studio.id));
-              setModal(null);
-              setToast("Studio listing deleted");
+            confirm={async () => {
+              try { await deleteStudio(modal.studio); }
+              catch (error) { setToast(error.message || "Could not delete listing."); }
             }}
           />
         ) : (
@@ -675,7 +709,6 @@ function App() {
     </div>
   );
 }
-
 function Home({ go, studios, toggleFavorite, favorites }) {
   const [slide, setSlide] = useState(0);
   const [subscribed, setSubscribed] = useState(false);
@@ -753,12 +786,12 @@ function Home({ go, studios, toggleFavorite, favorites }) {
         </div>
         <div className="hero-foot">
           <span>
-            0{slide + 1} / 03 &nbsp;{" "}
+            0{slide + 1} / 03  {" "}
             <button onClick={() => setSlide((slide + 2) % 3)}>←</button>{" "}
             <button onClick={() => setSlide((slide + 1) % 3)}>→</button>
           </span>
           <span className="hero-location">
-            Brooklyn, NY &nbsp; · &nbsp; 40°41′ N 73°59′ W
+            Brooklyn, NY   ·   40°41′ N 73°59′ W
           </span>
         </div>
         <div className="hero-index">
@@ -942,7 +975,6 @@ function Home({ go, studios, toggleFavorite, favorites }) {
     </main>
   );
 }
-
 function SectionHead({ label, title, action, onClick }) {
   return (
     <div className="section-head">
@@ -1047,21 +1079,20 @@ function Footer({ go }) {
         </div>
         <div className="footer-social">
           <b>FOLLOW THE GOOD STUFF</b>
-          <span>Instagram &nbsp; ↗</span>
-          <span>TikTok &nbsp; ↗</span>
-          <span>X &nbsp; ↗</span>
+          <span>Instagram   ↗</span>
+          <span>TikTok   ↗</span>
+          <span>X   ↗</span>
         </div>
       </div>
       <div className="footer-bottom">
         <span>© 2025 StudioSpace, Inc. Made for the makers.</span>
         <span>
-          Privacy &nbsp; · &nbsp; Terms &nbsp; · &nbsp; Made with care <i>✳</i>
+          Privacy   ·   Terms   ·   Made with care <i>✳</i>
         </span>
       </div>
     </footer>
   );
 }
-
 function AuthPage({ mode, go, setUser, setToast }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1104,7 +1135,11 @@ function AuthPage({ mode, go, setUser, setToast }) {
         setToast("Welcome back");
         const next = sessionStorage.getItem("ss-next") || "/";
         sessionStorage.removeItem("ss-next");
-        go(next);
+        go(
+          next.startsWith("/") && !next.startsWith("//")
+            ? next
+            : "/",
+        );
       }
     } catch (error) {
       setErr(error.message);
@@ -1113,7 +1148,11 @@ function AuthPage({ mode, go, setUser, setToast }) {
     }
   };
   const googleLogin = () => {
-    const returnTo = sessionStorage.getItem("ss-next") || "/";
+    const storedNext = sessionStorage.getItem("ss-next") || "/";
+    const returnTo =
+      storedNext.startsWith("/") && !storedNext.startsWith("//")
+        ? storedNext
+        : "/";
     window.location.assign(
       `${API_BASE}/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`,
     );
@@ -1235,7 +1274,6 @@ function AuthPage({ mode, go, setUser, setToast }) {
     </main>
   );
 }
-
 function PrivatePage({
   route,
   user,
@@ -1247,6 +1285,9 @@ function PrivatePage({
   setBookings,
   setToast,
   setModal,
+  createStudio,
+  deleteStudio,
+  cancelBooking,
 }) {
   useEffect(() => {
     if (!user) requireAuth(route);
@@ -1267,19 +1308,9 @@ function PrivatePage({
         </p>
         <StudioForm
           user={user}
-          onSave={(s) => {
-            setStudios([
-              ...studios,
-              {
-                ...s,
-                id: `s${Date.now()}`,
-                rating: "New",
-                tag: "JUST ADDED",
-                owner: user.email,
-              },
-            ]);
-            setToast("Your studio is live");
-            go("/my-listings");
+          onSave={async (studio) => {
+            try { await createStudio(studio); }
+            catch (error) { setToast(error.message || "Could not publish your studio."); }
           }}
         />
       </main>
@@ -1374,14 +1405,7 @@ function PrivatePage({
                 </span>
                 {b.status === "Pending" && (
                   <button
-                    onClick={() => {
-                      setBookings(
-                        bookings.map((x) =>
-                          x.id === b.id ? { ...x, status: "Cancelled" } : x,
-                        ),
-                      );
-                      setToast("Booking cancelled");
-                    }}
+                    onClick={() => cancelBooking(b)}
                   >
                     Cancel
                   </button>
@@ -1464,14 +1488,14 @@ function StudioForm({ user, onSave }) {
   return (
     <form
       className="studio-form"
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         const d = Object.fromEntries(new FormData(e.currentTarget));
         if (!d.title || !d.rate || !d.image) {
           setError("Please fill in the required fields.");
           return;
         }
-        onSave({
+        await onSave({
           ...d,
           rate: Number(d.rate),
           amenities: d.amenities
@@ -1554,9 +1578,39 @@ function StudioForm({ user, onSave }) {
   );
 }
 function BookingModal({ studio, close, book }) {
-  const [date, setDate] = useState(""),
-    [start, setStart] = useState("10:00"),
-    [end, setEnd] = useState("12:00");
+  const [date, setDate] = useState("");
+  const [start, setStart] = useState("10:00");
+  const [end, setEnd] = useState("12:00");
+  const [error, setError] = useState("");
+  const toMinutes = (time) => {
+    const [hours, minutes] = time.split(":").map(Number);
+    return hours * 60 + minutes;
+  };
+  const duration = Math.max(0, toMinutes(end) - toMinutes(start));
+  const total = (studio.rate * duration) / 60;
+  const today = new Date();
+  const minDate = [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, "0"),
+    String(today.getDate()).padStart(2, "0"),
+  ].join("-");
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setError("");
+    if (!date) {
+      setError("Please choose a booking date.");
+      return;
+    }
+    if (date < minDate) {
+      setError("Please choose today or a future date.");
+      return;
+    }
+    if (duration <= 0) {
+      setError("End time must be later than start time.");
+      return;
+    }
+    book(studio, { date, start, end });
+  };
   return (
     <div
       className="modal-backdrop"
@@ -1566,10 +1620,7 @@ function BookingModal({ studio, close, book }) {
     >
       <form
         className="booking-modal"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (date && end > start) book(studio, { date, start, end });
-        }}
+        onSubmit={handleSubmit}
       >
         <button type="button" className="modal-close" onClick={close}>
           ×
@@ -1581,11 +1632,16 @@ function BookingModal({ studio, close, book }) {
         <p>
           {studio.title} · ${studio.rate} / hour
         </p>
+        {error && (
+          <div className="form-error" role="alert">
+            {error}
+          </div>
+        )}
         <label>
           Choose a date
           <input
             type="date"
-            min={new Date().toISOString().slice(0, 10)}
+            min={minDate}
             value={date}
             required
             onChange={(e) => setDate(e.target.value)}
@@ -1613,16 +1669,12 @@ function BookingModal({ studio, close, book }) {
         </div>
         <div className="booking-total">
           <span>Estimated total</span>
-          <b>
-            $
-            {studio.rate *
-              Math.max(
-                1,
-                Number(end.split(":")[0]) - Number(start.split(":")[0]),
-              )}
-          </b>
+          <b>${total.toFixed(2)}</b>
         </div>
-        <button className="button button-orange auth-submit">
+        <button
+          className="button button-orange auth-submit"
+          disabled={duration <= 0 || !date}
+        >
           Send booking request ↗
         </button>
         <small className="modal-note">
