@@ -166,23 +166,45 @@ function App() {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
   }, [dark]);
   // Fetch public studios from the backend instead of browser storage.
-  useEffect(() => {
-    let active = true;
-    const loadStudios = async () => {
-      setStudiosLoading(true);
-      try {
-        const result = await apiRequest("/api/studios");
-        if (active) setStudios(listFrom(result, ["studios"]).map(normalizeStudio).filter(Boolean));
-      } catch (error) {
-        console.error("Could not load studios:", error);
-        if (active) setToast(error.message || "Could not load studios.");
-      } finally {
-        if (active) setStudiosLoading(false);
+ 
+useEffect(() => {
+  let active = true;
+
+  const loadStudios = async () => {
+    setStudiosLoading(true);
+
+    try {
+      const result = await apiRequest("/api/studios");
+
+      console.log("STUDIOS API RESPONSE:", result);
+
+      if (active) {
+        setStudios(
+          listFrom(result, ["studios"])
+            .map(normalizeStudio)
+            .filter(Boolean)
+        );
       }
-    };
-    loadStudios();
-    return () => { active = false; };
-  }, []);
+    } catch (error) {
+      console.error("Could not load studios:", error);
+
+      if (active) {
+        setToast(error.message || "Could not load studios.");
+      }
+    } finally {
+      if (active) {
+        setStudiosLoading(false);
+      }
+    }
+  };
+
+  loadStudios();
+
+  return () => {
+    active = false;
+  };
+}, []);
+
 
   // Load private data after the authentication check completes.
   useEffect(() => {
